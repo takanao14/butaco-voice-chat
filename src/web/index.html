@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f7eee8" />
+    <title>ブタコとおしゃべり</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div class="badge" aria-hidden="true">🐷</div>
+        <div>
+          <p class="eyebrow">ローカル音声会話</p>
+          <h1>ブタコとおしゃべり</h1>
+        </div>
+      </header>
+
+      <section class="card" aria-label="音声会話">
+        <p class="intro">ボタンを押して話しかけてね。もう一度押すと録音を止めるよ。フゴー。</p>
+        <p id="availability" class="availability" role="status">接続を確認中…</p>
+        <button id="record" class="record" type="button" disabled>読み込み中</button>
+        <p id="state" class="state" role="status" aria-live="polite">準備しています</p>
+      </section>
+
+      <section id="answer" class="card answer" hidden aria-label="会話結果">
+        <div class="line">
+          <p class="label">きこえた言葉</p>
+          <p id="transcript"></p>
+        </div>
+        <div class="line">
+          <p class="label">ブタコの返事</p>
+          <p id="reply"></p>
+        </div>
+        <audio id="audio" controls preload="none" aria-label="ブタコの返事を再生"></audio>
+      </section>
+
+      <footer>音声: VOICEVOX:ずんだもん</footer>
+    </main>
+  </body>
+</html>

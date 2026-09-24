@@ -1,0 +1,10 @@
+services:
+  voicevox:
+    image: voicevox/voicevox_engine:cpu-arm64-0.25.2@sha256:5308001079a9e46b4eba966d6672076d28f6848c33afbcb40e4e2df31d498134
+    platform: linux/arm64
+    entrypoint: ["/bin/bash", "-c"]
+    command: ["exec /entrypoint.sh gosu user /opt/voicevox_engine/run --host 0.0.0.0 >/dev/null 2>&1"]
+    environment:
+      VV_CPU_NUM_THREADS: "4"
+    ports:
+      - "127.0.0.1:50021:50021"
