@@ -48,7 +48,16 @@ server at startup, and the file is read once at startup:
 `name` and `credit` appear in the UI; keep `credit` in VOICEVOX's
 `VOICEVOX:<speaker name>` form for the selected `speaker`.
 `speechReplacements` rewrite the reply before synthesis, and transcripts
-matching `hallucinations` are treated as silence. The default values are in
+matching `hallucinations` are treated as silence. An optional `football` object
+(`{"teams": [{"espnId": "359", "name": "アーセナル", "fan": "ユーザー"}]}`)
+enables match facts: a background fetcher reads the teams' Premier League,
+Champions League, League Cup, and FA Cup matches and the Premier League table
+from ESPN's unofficial API every 30 minutes, and each conversation appends a
+Japanese summary to the system prompt. Times, results, and table order are
+computed in `internal/football`, not by the model. If no refresh has
+succeeded within three hours, the summary says match data is unavailable.
+`BUTAKO_ESPN_LIVE=1 go test -run TestESPNLive -v ./internal/football` checks
+the live API shape. The default values are in
 `internal/butako/character.go`.
 
 VOICEVOX logs `audio_query` text by default. The development container's

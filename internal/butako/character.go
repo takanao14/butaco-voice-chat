@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/takanao14/butaco-voice-chat/internal/football"
 )
 
 // Character holds the persona and voice settings that can change without a
@@ -19,6 +21,8 @@ type Character struct {
 	Speaker            int           `json:"speaker"`
 	SpeechReplacements []Replacement `json:"speechReplacements"`
 	Hallucinations     []string      `json:"hallucinations"`
+	// Football enables match facts for these teams; nil disables them.
+	Football *football.Config `json:"football"`
 }
 
 // Replacement rewrites display text before speech synthesis. The list order
@@ -55,13 +59,14 @@ func LoadCharacter(path string) (Character, error) {
 		return Character{}, err
 	}
 	var file struct {
-		Name               *string        `json:"name"`
-		Credit             *string        `json:"credit"`
-		SystemPrompt       *string        `json:"systemPrompt"`
-		ASRPrompt          *string        `json:"asrPrompt"`
-		Speaker            *int           `json:"speaker"`
-		SpeechReplacements *[]Replacement `json:"speechReplacements"`
-		Hallucinations     *[]string      `json:"hallucinations"`
+		Name               *string          `json:"name"`
+		Credit             *string          `json:"credit"`
+		SystemPrompt       *string          `json:"systemPrompt"`
+		ASRPrompt          *string          `json:"asrPrompt"`
+		Speaker            *int             `json:"speaker"`
+		SpeechReplacements *[]Replacement   `json:"speechReplacements"`
+		Hallucinations     *[]string        `json:"hallucinations"`
+		Football           *football.Config `json:"football"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -75,6 +80,9 @@ func LoadCharacter(path string) (Character, error) {
 	set(&character.Speaker, file.Speaker)
 	set(&character.SpeechReplacements, file.SpeechReplacements)
 	set(&character.Hallucinations, file.Hallucinations)
+	if file.Football != nil {
+		character.Football = file.Football
+	}
 	if err := character.validate(); err != nil {
 		return Character{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -98,6 +106,9 @@ func (c Character) validate() error {
 		if replacement.From == "" {
 			return errors.New("speechReplacements must not have an empty from")
 		}
+	}
+	if c.Football != nil {
+		return c.Football.Validate()
 	}
 	return nil
 }

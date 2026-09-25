@@ -70,3 +70,25 @@ func TestLoadCharacterRejectsInvalidFiles(t *testing.T) {
 		t.Fatal("expected an error for a missing file")
 	}
 }
+
+func TestLoadCharacterFootball(t *testing.T) {
+	character, err := LoadCharacter(writeCharacter(t, `{"football": {"teams": [{"espnId": "359", "name": "アーセナル", "fan": "ユーザー"}]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if character.Football == nil || character.Football.Teams[0].ID != "359" {
+		t.Fatalf("football = %+v", character.Football)
+	}
+	if DefaultCharacter().Football != nil {
+		t.Fatal("football should be disabled by default")
+	}
+	for name, content := range map[string]string{
+		"no teams":     `{"football": {"teams": []}}`,
+		"unknown key":  `{"football": {"teams": [{"id": "359", "name": "アーセナル"}]}}`,
+		"missing name": `{"football": {"teams": [{"espnId": "359"}]}}`,
+	} {
+		if _, err := LoadCharacter(writeCharacter(t, content)); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}

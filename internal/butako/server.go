@@ -10,8 +10,9 @@ import (
 	"time"
 )
 
-func NewHandler(config Config) http.Handler {
-	s := &service{config: config, client: &http.Client{}, speech: config.Character.speechReplacer()}
+// NewHandler serves the UI and API. facts may be nil.
+func NewHandler(config Config, facts Facts) http.Handler {
+	s := &service{config: config, client: &http.Client{}, speech: config.Character.speechReplacer(), facts: facts}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

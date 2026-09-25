@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type conversationResult struct {
@@ -38,6 +39,12 @@ type service struct {
 	config Config
 	client *http.Client
 	speech *strings.Replacer
+	facts  Facts
+}
+
+// Facts supplies reference information appended to the system prompt.
+type Facts interface {
+	Facts(now time.Time) string
 }
 
 func (s *service) converse(ctx context.Context, wav []byte) (conversationResult, error) {
@@ -111,7 +118,11 @@ func (s *service) reply(ctx context.Context, transcript string) (string, error) 
 		MaxTokens       int           `json:"max_tokens"`
 		Stream          bool          `json:"stream"`
 	}{Model: s.config.LLMModel, ReasoningEffort: "none", MaxTokens: 160}
-	request.Messages = []chatMessage{{"system", s.config.Character.SystemPrompt}, {"user", transcript}}
+	system := s.config.Character.SystemPrompt
+	if s.facts != nil {
+		system += "\n\n" + s.facts.Facts(time.Now())
+	}
+	request.Messages = []chatMessage{{"system", system}, {"user", transcript}}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return "", &stageError{"llm_failed", http.StatusBadGateway}
