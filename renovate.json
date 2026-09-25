@@ -1,0 +1,43 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":separateMajorReleases",
+    ":combinePatchMinorReleases",
+    ":rebaseStalePrs"
+  ],
+  "timezone": "Asia/Tokyo",
+  "minimumReleaseAge": "2 days",
+  "labels": ["dependencies", "renovate", "manual-review"],
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "labels": ["dependencies", "renovate", "manual-review", "security"],
+    "assignees": ["takanao14"],
+    "minimumReleaseAge": null
+  },
+  "packageRules": [
+    {
+      "description": "Use version tags for GitHub-authored actions; retain digest pinning for third-party actions.",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["actions/**", "github/**"],
+      "pinDigests": false
+    },
+    {
+      "description": "Keep the web build on the Node.js 22 LTS line; a new major is a deliberate change.",
+      "matchDatasources": ["docker", "node-version"],
+      "matchPackageNames": ["node"],
+      "allowedVersions": "<23"
+    },
+    {
+      "description": "Group the Dockerfile base images so builder and runtime Alpine updates are tested together.",
+      "matchManagers": ["dockerfile"],
+      "groupName": "base images"
+    },
+    {
+      "description": "Label major updates; nothing in this repository auto-merges.",
+      "matchUpdateTypes": ["major"],
+      "labels": ["dependencies", "renovate", "manual-review", "major-update"]
+    }
+  ]
+}
