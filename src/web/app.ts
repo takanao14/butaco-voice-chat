@@ -27,6 +27,7 @@ let chunks: Blob[] = [];
 let startedAt = 0;
 let busy = false;
 let audioURL: string | null = null;
+let stopRecording: ((reason: "manual") => void) | null = null;
 
 const idleMessage = "ボタンを押して話しかけてね。";
 const waitingMessage = "準備ができるまで少し待ってね。";
@@ -179,11 +180,70 @@ async function sendWAV(wav: Blob): Promise<void> {
   }
 }
 
-async function handleRecording(chunksToProcess: Blob[], mimeType: string): Promise<void> {
+// Speech endpointing: sample the input level and stop after speech followed by
+// silence. The noise floor is measured first and then tracks the room.
+const endpoint = {
+  intervalMs: 50,
+  calibrationMs: 250,
+  minThreshold: 0.01,
+  thresholdRatio: 3,
+  speechMs: 200,
+  silenceMs: 1_200,
+  noSpeechMs: 8_000,
+};
+
+type StopReason = "manual" | "silence" | "no_speech" | "limit";
+
+function watchSpeech(context: AudioContext, input: MediaStream, onEnd: (reason: StopReason) => void): () => void {
+  const analyser = context.createAnalyser();
+  analyser.fftSize = 1024;
+  context.createMediaStreamSource(input).connect(analyser);
+  const samples = new Float32Array(analyser.fftSize);
+  const started = performance.now();
+  let floor = 0;
+  let calibration = 0;
+  let voicedMs = 0;
+  let spoke = false;
+  let lastVoice = started;
+  const timer = window.setInterval(() => {
+    analyser.getFloatTimeDomainData(samples);
+    let energy = 0;
+    for (const sample of samples) energy += sample * sample;
+    const level = Math.sqrt(energy / samples.length);
+    const now = performance.now();
+    if (now - started < endpoint.calibrationMs) {
+      calibration++;
+      floor += (level - floor) / calibration;
+      return;
+    }
+    const threshold = Math.max(endpoint.minThreshold, floor * endpoint.thresholdRatio);
+    if (level > threshold) {
+      voicedMs += endpoint.intervalMs;
+      lastVoice = now;
+      if (voicedMs >= endpoint.speechMs) spoke = true;
+      // Rise slowly so steady background noise is absorbed but speech is not.
+      floor += (level - floor) * 0.001;
+    } else {
+      floor += (level - floor) * (level < floor ? 0.1 : 0.01);
+    }
+    if (spoke && now - lastVoice >= endpoint.silenceMs) finish("silence");
+    else if (!spoke && now - started >= endpoint.noSpeechMs) finish("no_speech");
+  }, endpoint.intervalMs);
+  let done = false;
+  function finish(reason: StopReason): void {
+    if (done) return;
+    done = true;
+    window.clearInterval(timer);
+    onEnd(reason);
+  }
+  return () => { done = true; window.clearInterval(timer); };
+}
+
+async function handleRecording(chunksToProcess: Blob[], mimeType: string, reason: StopReason): Promise<void> {
   busy = true;
   updateButton();
   try {
-    if (performance.now() - startedAt < 500) throw new Error("silence");
+    if (reason === "no_speech" || performance.now() - startedAt < 500) throw new Error("silence");
     setState("録音を変換しています…");
     const wav = await convertToWAV(new Blob(chunksToProcess, { type: mimeType }));
     if (wav.size > config.maxAudioBytes) throw new Error("audio_too_large");
@@ -204,29 +264,47 @@ async function startRecording(): Promise<void> {
   busy = true;
   clearAnswer();
   updateButton();
+  // Create the context inside the tap; iOS Safari keeps contexts created
+  // after an await suspended.
+  const context = new AudioContext();
+  let stopWatching = (): void => {};
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mimeType = ["audio/mp4", "audio/webm"].find(type => MediaRecorder.isTypeSupported(type));
     if (!mimeType) throw new Error("unsupported_audio");
+    await context.resume();
     chunks = [];
     const current = new MediaRecorder(stream, { mimeType });
     recorder = current;
+    let reason: StopReason = "manual";
+    const stop = (why: StopReason): void => {
+      if (current.state !== "recording") return;
+      reason = why;
+      current.stop();
+    };
+    stopRecording = stop;
     // 60 seconds of 16 kHz mono PCM16 stays under the 2 MiB request limit.
-    const limit = window.setTimeout(() => { if (current.state === "recording") current.stop(); }, 60_000);
+    const limit = window.setTimeout(() => stop("limit"), 60_000);
+    stopWatching = watchSpeech(context, stream, stop);
     current.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
     current.onstop = () => {
       window.clearTimeout(limit);
+      stopWatching();
+      void context.close();
       stream?.getTracks().forEach(track => track.stop());
       stream = null;
       recorder = null;
-      void handleRecording(chunks, mimeType);
+      stopRecording = null;
+      void handleRecording(chunks, mimeType, reason);
     };
     current.start();
     startedAt = performance.now();
     busy = false;
-    setState("録音中です。話し終えたらボタンを押してね。（最長 60 秒）");
+    setState("録音中です。話し終えると自動で送るよ。（ボタンでも止められます）");
     updateButton();
   } catch (error) {
+    stopWatching();
+    void context.close();
     stream?.getTracks().forEach(track => track.stop());
     stream = null;
     busy = false;
@@ -241,7 +319,7 @@ async function startRecording(): Promise<void> {
 
 recordButton.addEventListener("click", () => {
   if (recorder?.state === "recording") {
-    recorder.stop();
+    stopRecording?.("manual");
     return;
   }
   if (!busy) void startRecording();

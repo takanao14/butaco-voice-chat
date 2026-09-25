@@ -72,8 +72,14 @@ func formatDate(t time.Time) string {
 	return fmt.Sprintf("%d月%d日（%s）", t.Month(), t.Day(), weekdays[t.Weekday()])
 }
 
+// formatTime writes "18時ちょうど" rather than "18時00分", which the model
+// once rendered as "十八時空分".
 func formatTime(t time.Time) string {
-	return formatDate(t) + fmt.Sprintf("%d時%02d分", t.In(jst).Hour(), t.In(jst).Minute())
+	t = t.In(jst)
+	if t.Minute() == 0 {
+		return formatDate(t) + fmt.Sprintf("%d時ちょうど", t.Hour())
+	}
+	return formatDate(t) + fmt.Sprintf("%d時%d分", t.Hour(), t.Minute())
 }
 
 // relativeDay compares JST calendar dates, so a match at 23:00 yesterday is
