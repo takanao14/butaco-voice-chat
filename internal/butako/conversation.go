@@ -47,7 +47,13 @@ type Facts interface {
 	Facts(now time.Time) string
 }
 
-func (s *service) converse(ctx context.Context, wav []byte) (conversationResult, error) {
+// Turn is one earlier exchange the browser keeps and sends back.
+type Turn struct {
+	User      string `json:"user"`
+	Assistant string `json:"assistant"`
+}
+
+func (s *service) converse(ctx context.Context, wav []byte, history []Turn) (conversationResult, error) {
 	transcript, err := s.transcribe(ctx, wav)
 	if err != nil {
 		return conversationResult{}, err
@@ -55,7 +61,7 @@ func (s *service) converse(ctx context.Context, wav []byte) (conversationResult,
 	if emptyOrHallucinated(transcript, s.config.Character.Hallucinations) {
 		return conversationResult{}, &stageError{"silence", http.StatusUnprocessableEntity}
 	}
-	display, err := s.reply(ctx, transcript)
+	display, err := s.reply(ctx, history, transcript)
 	if err != nil {
 		return conversationResult{}, err
 	}
@@ -110,7 +116,7 @@ func (s *service) transcribe(ctx context.Context, wav []byte) (string, error) {
 	return strings.TrimSpace(response.Text), nil
 }
 
-func (s *service) reply(ctx context.Context, transcript string) (string, error) {
+func (s *service) reply(ctx context.Context, history []Turn, transcript string) (string, error) {
 	request := struct {
 		Model           string        `json:"model"`
 		Messages        []chatMessage `json:"messages"`
@@ -122,7 +128,11 @@ func (s *service) reply(ctx context.Context, transcript string) (string, error) 
 	if s.facts != nil {
 		system += "\n\n" + s.facts.Facts(time.Now())
 	}
-	request.Messages = []chatMessage{{"system", system}, {"user", transcript}}
+	request.Messages = []chatMessage{{"system", system}}
+	for _, turn := range history {
+		request.Messages = append(request.Messages, chatMessage{"user", turn.User}, chatMessage{"assistant", turn.Assistant})
+	}
+	request.Messages = append(request.Messages, chatMessage{"user", transcript})
 	body, err := json.Marshal(request)
 	if err != nil {
 		return "", &stageError{"llm_failed", http.StatusBadGateway}

@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f7eee8" />
     <title>ブタコとおしゃべり</title>
-    <link rel="stylesheet" href="/styles.css?v=0.1.5" />
-    <script type="module" src="/app.js?v=0.1.5"></script>
+    <link rel="stylesheet" href="/styles.css?v=0.1.7" />
+    <script type="module" src="/app.js?v=0.1.7"></script>
   </head>
   <body>
     <main class="shell">
@@ -22,6 +22,7 @@
         <p class="intro">ボタンを押して話しかけてね。もう一度押すと録音を止めるよ。フゴー。</p>
         <p id="availability" class="availability" role="status">接続を確認中…</p>
         <button id="record" class="record" type="button" disabled>読み込み中</button>
+        <label class="mode"><input id="continuous" type="checkbox" /> 続けて話す（会話モード）</label>
         <p id="state" class="state" role="status" aria-live="polite">準備しています</p>
       </section>
 

@@ -2,6 +2,7 @@ package butako
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -241,5 +242,85 @@ func TestConversationAppendsFacts(t *testing.T) {
 	}
 	if systemPrompt != character.SystemPrompt+"\n\n【試合情報】テスト" {
 		t.Fatalf("system prompt = %q", systemPrompt)
+	}
+}
+
+func encodeHistory(t *testing.T, turns any) string {
+	t.Helper()
+	raw, err := json.Marshal(turns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func TestConversationSendsHistory(t *testing.T) {
+	var messages []chatMessage
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/audio/transcriptions", respond(200, `{"text":"誰が決めたの？"}`))
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []chatMessage `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		messages = request.Messages
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"クーニャだよ"}}]}`)
+	})
+	mux.HandleFunc("/audio_query", respond(200, `{}`))
+	mux.HandleFunc("/synthesis", respond(200, string(testWAV(1600, 0.3))))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	handler := NewHandler(Config{LemonadeURL: server.URL, VoicevoxURL: server.URL, Deadline: time.Second, Character: DefaultCharacter()}, nil)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/conversation", bytes.NewReader(testWAV(16000, 0.3)))
+	request.Header.Set("Content-Type", "audio/wav")
+	request.Header.Set(historyHeader, encodeHistory(t, []Turn{{"ユナイテッドどうだった？", "フラムと引き分けだよ"}}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body)
+	}
+	var roles, contents []string
+	for _, message := range messages {
+		roles = append(roles, message.Role)
+		contents = append(contents, message.Content)
+	}
+	if strings.Join(roles, ",") != "system,user,assistant,user" ||
+		contents[1] != "ユナイテッドどうだった？" || contents[2] != "フラムと引き分けだよ" || contents[3] != "誰が決めたの？" {
+		t.Fatalf("messages = %+v", messages)
+	}
+}
+
+func TestParseHistory(t *testing.T) {
+	long := strings.Repeat("あ", maxHistoryRunes+1)
+	turn := Turn{"こんにちは", "フゴー"}
+	for name, test := range map[string]struct {
+		value string
+		ok    bool
+		turns int
+	}{
+		"empty":           {"", true, 0},
+		"three turns":     {encodeHistory(t, []Turn{turn, turn, turn}), true, 3},
+		"four turns":      {encodeHistory(t, []Turn{turn, turn, turn, turn}), false, 0},
+		"too long":        {encodeHistory(t, []Turn{{long, "x"}}), false, 0},
+		"blank assistant": {encodeHistory(t, []Turn{{"x", " "}}), false, 0},
+		"not base64":      {"@@@", false, 0},
+		"not json":        {base64.RawURLEncoding.EncodeToString([]byte("nope")), false, 0},
+	} {
+		turns, err := parseHistory(test.value)
+		if (err == nil) != test.ok || len(turns) != test.turns {
+			t.Errorf("%s: turns=%d err=%v", name, len(turns), err)
+		}
+	}
+}
+
+func TestConversationRejectsInvalidHistory(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/conversation", bytes.NewReader(testWAV(16000, 0.3)))
+	request.Header.Set("Content-Type", "audio/wav")
+	request.Header.Set(historyHeader, "@@@")
+	recorder := httptest.NewRecorder()
+	newTestHandler(t, upstream{}).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest || errorCode(t, recorder) != "invalid_history" {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body)
 	}
 }

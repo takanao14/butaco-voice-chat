@@ -2,12 +2,15 @@ package butako
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"mime"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // NewHandler serves the UI and API. facts may be nil.
@@ -107,7 +110,12 @@ func (s *service) conversation(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	result, err := s.converse(ctx, body)
+	history, err := parseHistory(r.Header.Get(historyHeader))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_history")
+		return
+	}
+	result, err := s.converse(ctx, body, history)
 	if err != nil {
 		var stage *stageError
 		if errors.As(err, &stage) {
@@ -125,6 +133,39 @@ func (s *service) conversation(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(encoded)
+}
+
+const (
+	historyHeader   = "X-Butako-History"
+	maxHistoryTurns = 3
+	maxHistoryRunes = 500
+)
+
+// parseHistory decodes the browser's recent turns: base64url of a JSON array.
+// The server keeps nothing between requests.
+func parseHistory(value string) ([]Turn, error) {
+	if value == "" {
+		return nil, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return nil, err
+	}
+	var history []Turn
+	if err := json.Unmarshal(raw, &history); err != nil {
+		return nil, err
+	}
+	if len(history) > maxHistoryTurns {
+		return nil, errors.New("too many turns")
+	}
+	for _, turn := range history {
+		for _, text := range []string{turn.User, turn.Assistant} {
+			if strings.TrimSpace(text) == "" || utf8.RuneCountInString(text) > maxHistoryRunes {
+				return nil, errors.New("invalid turn")
+			}
+		}
+	}
+	return history, nil
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {

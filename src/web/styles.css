@@ -23,6 +23,8 @@ h1 { margin: 0; font-size: 1.65rem; line-height: 1.3; }
 .record.recording { background: #7f3742; animation: pulse 1.4s infinite; }
 .record:disabled { background: #c7b6b0; cursor: not-allowed; animation: none; }
 .record:focus-visible { outline: .2rem solid #45352e; outline-offset: .2rem; }
+.mode { display: flex; gap: .5rem; align-items: center; justify-content: center; margin-top: .9rem; color: #705d54; font-size: .95rem; }
+.mode input { width: 1.2rem; height: 1.2rem; accent-color: #b34756; }
 .state { min-height: 1.5rem; margin: 1rem 0 0; text-align: center; color: #705d54; }
 
 .answer { margin-top: 1rem; }

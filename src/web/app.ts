@@ -27,7 +27,24 @@ let chunks: Blob[] = [];
 let startedAt = 0;
 let busy = false;
 let audioURL: string | null = null;
-let stopRecording: ((reason: "manual") => void) | null = null;
+let stopRecording: ((reason: "manual" | "hidden") => void) | null = null;
+// One context for the page, created on the first tap: iOS Safari keeps
+// contexts created without a user gesture suspended.
+let audioContext: AudioContext | null = null;
+
+// Conversation mode: after a reply finishes playing, listen again without a tap.
+const continuous = document.querySelector<HTMLInputElement>("#continuous")!;
+let conversing = false;
+let conversationTurns = 0;
+let wakeLock: WakeLockSentinel | null = null;
+
+// Recent turns stay in this page's memory only and are sent with each request.
+type Turn = { user: string; assistant: string };
+const historyTurns = 3;
+const historyTTLms = 10 * 60_000;
+const historyRunes = 500;
+let turns: Turn[] = [];
+let lastTurnAt = 0;
 
 const idleMessage = "ボタンを押して話しかけてね。";
 const waitingMessage = "準備ができるまで少し待ってね。";
@@ -71,7 +88,7 @@ function updateButton(): void {
     return;
   }
   recordButton.classList.remove("recording");
-  recordButton.textContent = busy ? "処理中…" : "話しかける";
+  recordButton.textContent = busy ? "処理中…" : conversing ? "会話を終える" : "話しかける";
   recordButton.disabled = busy || currentStatus.lemonade === "unavailable" || !currentStatus.voicevoxReady;
 }
 
@@ -153,13 +170,35 @@ function decodeBase64WAV(value: string): Blob {
   return new Blob([bytes], { type: "audio/wav" });
 }
 
-async function sendWAV(wav: Blob): Promise<void> {
+function recentHistory(): Turn[] {
+  if (performance.now() - lastTurnAt > historyTTLms) turns = [];
+  return turns;
+}
+
+function remember(user: string, assistant: string): void {
+  const clip = (text: string): string => Array.from(text).slice(0, historyRunes).join("");
+  turns = [...recentHistory(), { user: clip(user), assistant: clip(assistant) }].slice(-historyTurns);
+  lastTurnAt = performance.now();
+}
+
+// base64url of UTF-8 JSON, the form the server's X-Butako-History expects.
+function encodeHistory(items: Turn[]): string {
+  let binary = "";
+  for (const byte of new TextEncoder().encode(JSON.stringify(items))) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// sendWAV returns whether the reply started playing on its own.
+async function sendWAV(wav: Blob): Promise<boolean> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), config.deadlineMs);
   try {
+    const headers: Record<string, string> = { "Content-Type": "audio/wav" };
+    const recent = recentHistory();
+    if (recent.length) headers["X-Butako-History"] = encodeHistory(recent);
     const response = await fetch("/api/conversation", {
       method: "POST",
-      headers: { "Content-Type": "audio/wav" },
+      headers,
       body: wav,
       signal: controller.signal,
     });
@@ -168,13 +207,19 @@ async function sendWAV(wav: Blob): Promise<void> {
       throw new Error(failure?.error?.code || "network_error");
     }
     const result = await response.json() as Conversation;
+    remember(result.transcript, result.displayText);
     transcript.textContent = result.transcript;
     reply.textContent = result.displayText;
     audioURL = URL.createObjectURL(decodeBase64WAV(result.audioWavBase64));
     audio.src = audioURL;
     answer.hidden = false;
-    setState("返事ができました。再生ボタンから聞いてね。");
-    try { await audio.play(); } catch { /* Safari may require another tap. */ }
+    setState(conversing ? "返事を再生しています…" : "返事ができました。再生ボタンから聞いてね。");
+    try {
+      await audio.play();
+      return true;
+    } catch {
+      return false; // Safari may require another tap.
+    }
   } finally {
     window.clearTimeout(timeout);
   }
@@ -192,7 +237,7 @@ const endpoint = {
   noSpeechMs: 8_000,
 };
 
-type StopReason = "manual" | "silence" | "no_speech" | "limit";
+type StopReason = "manual" | "silence" | "no_speech" | "limit" | "hidden";
 
 function watchSpeech(context: AudioContext, input: MediaStream, onEnd: (reason: StopReason) => void): () => void {
   const analyser = context.createAnalyser();
@@ -239,18 +284,38 @@ function watchSpeech(context: AudioContext, input: MediaStream, onEnd: (reason: 
   return () => { done = true; window.clearInterval(timer); };
 }
 
-async function handleRecording(chunksToProcess: Blob[], mimeType: string, reason: StopReason): Promise<void> {
+function endConversation(message?: string): void {
+  conversing = false;
+  void wakeLock?.release().catch(() => undefined);
+  wakeLock = null;
+  if (message) setState(message);
+  updateButton();
+}
+
+// handleRecording returns whether conversation mode should listen again.
+async function handleRecording(chunksToProcess: Blob[], mimeType: string, reason: StopReason): Promise<boolean> {
   busy = true;
   updateButton();
+  let played = false;
   try {
+    if (reason === "hidden") {
+      endConversation("画面を離れたので会話を終わったよ。");
+      return false;
+    }
+    if (reason === "no_speech" && conversing && conversationTurns > 1) {
+      endConversation("話しかけがなかったので会話を終わったよ。ボタンを押すとまた話せるよ。");
+      return false;
+    }
     if (reason === "no_speech" || performance.now() - startedAt < 500) throw new Error("silence");
     setState("録音を変換しています…");
     const wav = await convertToWAV(new Blob(chunksToProcess, { type: mimeType }));
     if (wav.size > config.maxAudioBytes) throw new Error("audio_too_large");
     setState(`${config.name}が考えています…`);
-    await sendWAV(wav);
+    played = await sendWAV(wav);
+    if (conversing && !played) endConversation("返事ができました。再生ボタンから聞いてね。");
   } catch (error) {
     const code = error instanceof Error ? error.message : "network_error";
+    endConversation();
     setState(messages[code] || (error instanceof DOMException && error.name === "AbortError"
       ? messages.timeout! : "通信に失敗しました。もう一度試してね。"));
   } finally {
@@ -258,15 +323,42 @@ async function handleRecording(chunksToProcess: Blob[], mimeType: string, reason
     await pollStatus();
     updateButton();
   }
+  return conversing && played;
+}
+
+// Wait for the reply to finish, then listen again. Pausing the reply or
+// leaving the page ends conversation mode.
+async function continueConversation(): Promise<void> {
+  if (!audio.ended) {
+    await new Promise<void>(resolve => {
+      const done = (): void => {
+        audio.removeEventListener("ended", done);
+        audio.removeEventListener("pause", done);
+        resolve();
+      };
+      audio.addEventListener("ended", done);
+      audio.addEventListener("pause", done);
+    });
+  }
+  if (!conversing) return;
+  if (!audio.ended) {
+    endConversation("再生を止めたので会話を終わったよ。");
+    return;
+  }
+  if (document.visibilityState !== "visible" || recordButton.disabled) {
+    endConversation("会話を終わったよ。ボタンを押すとまた話せるよ。");
+    return;
+  }
+  await startRecording();
 }
 
 async function startRecording(): Promise<void> {
   busy = true;
+  if (conversing) conversationTurns++;
   clearAnswer();
+  setState("マイクを準備しています…");
   updateButton();
-  // Create the context inside the tap; iOS Safari keeps contexts created
-  // after an await suspended.
-  const context = new AudioContext();
+  const context = audioContext ??= new AudioContext();
   let stopWatching = (): void => {};
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -290,24 +382,28 @@ async function startRecording(): Promise<void> {
     current.onstop = () => {
       window.clearTimeout(limit);
       stopWatching();
-      void context.close();
+      // Close the mic before playback: iOS plays quietly while it is open.
       stream?.getTracks().forEach(track => track.stop());
       stream = null;
       recorder = null;
       stopRecording = null;
-      void handleRecording(chunks, mimeType, reason);
+      void handleRecording(chunks, mimeType, reason).then(next => {
+        if (next) void continueConversation();
+      });
     };
     current.start();
     startedAt = performance.now();
     busy = false;
-    setState("録音中です。話し終えると自動で送るよ。（ボタンでも止められます）");
+    setState(conversing
+      ? "どうぞ、話してね。（話し終えると自動で送るよ）"
+      : "録音中です。話し終えると自動で送るよ。（ボタンでも止められます）");
     updateButton();
   } catch (error) {
     stopWatching();
-    void context.close();
     stream?.getTracks().forEach(track => track.stop());
     stream = null;
     busy = false;
+    endConversation();
     if (error instanceof DOMException && error.name === "NotAllowedError") {
       setState("マイクが許可されていません。Safari の設定を確認してね。");
     } else {
@@ -322,7 +418,38 @@ recordButton.addEventListener("click", () => {
     stopRecording?.("manual");
     return;
   }
-  if (!busy) void startRecording();
+  if (busy) return;
+  if (conversing) {
+    audio.pause();
+    endConversation("会話を終わったよ。ボタンを押すとまた話せるよ。");
+    return;
+  }
+  if (continuous.checked) {
+    conversing = true;
+    conversationTurns = 0;
+  }
+  // startRecording creates the AudioContext synchronously, inside this tap.
+  void startRecording();
+  if (conversing && "wakeLock" in navigator) {
+    navigator.wakeLock.request("screen").then(lock => { wakeLock = lock; }, () => undefined);
+  }
+});
+
+continuous.addEventListener("change", () => {
+  // Turning the switch off lets the current turn finish without continuing.
+  if (!continuous.checked && conversing) {
+    conversing = false;
+    void wakeLock?.release().catch(() => undefined);
+    wakeLock = null;
+    updateButton();
+  }
+});
+
+// Leaving the page ends conversation mode; iOS keeps recording while hidden.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "hidden") return;
+  if (recorder?.state === "recording") stopRecording?.("hidden");
+  else if (conversing) endConversation("画面を離れたので会話を終わったよ。");
 });
 
 void (async () => {
