@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"time"
 )
@@ -76,6 +77,11 @@ func (s *service) conversation(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.Deadline)
 	defer cancel()
+	// Rejecting other media types forces a CORS preflight for cross-site posts.
+	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "audio/wav" {
+		writeError(w, http.StatusUnsupportedMediaType, "invalid_audio")
+		return
+	}
 	if r.ContentLength > maxAudioBytes {
 		writeError(w, http.StatusRequestEntityTooLarge, "audio_too_large")
 		return

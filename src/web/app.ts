@@ -88,6 +88,8 @@ async function pollStatus(): Promise<void> {
     availability.textContent = "会話できます";
   }
   updateButton();
+  // A turn may have started while the status request was in flight.
+  if (busy) return;
   if (recordButton.disabled) setState(waitingMessage);
   else if (state.textContent === waitingMessage) setState(idleMessage);
 }
@@ -198,18 +200,22 @@ async function startRecording(): Promise<void> {
     const mimeType = ["audio/mp4", "audio/webm"].find(type => MediaRecorder.isTypeSupported(type));
     if (!mimeType) throw new Error("unsupported_audio");
     chunks = [];
-    recorder = new MediaRecorder(stream, { mimeType });
-    recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
-    recorder.onstop = () => {
+    const current = new MediaRecorder(stream, { mimeType });
+    recorder = current;
+    // 60 seconds of 16 kHz mono PCM16 stays under the 2 MiB request limit.
+    const limit = window.setTimeout(() => { if (current.state === "recording") current.stop(); }, 60_000);
+    current.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
+    current.onstop = () => {
+      window.clearTimeout(limit);
       stream?.getTracks().forEach(track => track.stop());
       stream = null;
       recorder = null;
       void handleRecording(chunks, mimeType);
     };
-    recorder.start();
+    current.start();
     startedAt = performance.now();
     busy = false;
-    setState("録音中です。話し終えたらボタンを押してね。");
+    setState("録音中です。話し終えたらボタンを押してね。（最長 60 秒）");
     updateButton();
   } catch (error) {
     stream?.getTracks().forEach(track => track.stop());
