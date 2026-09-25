@@ -19,11 +19,10 @@ const systemPrompt = "あなたはブタのぬいぐるみ『ブタコ』です�
 const asrPrompt = "ブタコ、フゴー、マンチェスター・ユナイテッド"
 
 type conversationResult struct {
-	Transcript     string   `json:"transcript"`
-	DisplayText    string   `json:"displayText"`
-	SpeechText     string   `json:"speechText"`
-	AudioWAVBase64 string   `json:"audioWavBase64"`
-	Sources        []source `json:"sources,omitempty"`
+	Transcript     string `json:"transcript"`
+	DisplayText    string `json:"displayText"`
+	SpeechText     string `json:"speechText"`
+	AudioWAVBase64 string `json:"audioWavBase64"`
 }
 
 type chatMessage struct {
@@ -43,7 +42,7 @@ type service struct {
 	client *http.Client
 }
 
-func (s *service) converse(ctx context.Context, wav []byte, webSearch bool) (conversationResult, error) {
+func (s *service) converse(ctx context.Context, wav []byte) (conversationResult, error) {
 	transcript, err := s.transcribe(ctx, wav)
 	if err != nil {
 		return conversationResult{}, err
@@ -51,15 +50,9 @@ func (s *service) converse(ctx context.Context, wav []byte, webSearch bool) (con
 	if emptyOrHallucinated(transcript) {
 		return conversationResult{}, &stageError{"silence", http.StatusUnprocessableEntity}
 	}
-	var display string
-	var sources []source
-	if webSearch || requestsSearch(transcript) {
-		display, sources = s.searchReply(ctx, transcript)
-	} else {
-		display, err = s.reply(ctx, transcript)
-		if err != nil {
-			return conversationResult{}, err
-		}
+	display, err := s.reply(ctx, transcript)
+	if err != nil {
+		return conversationResult{}, err
 	}
 	speech := speechText(display)
 	if speech == "" {
@@ -74,7 +67,6 @@ func (s *service) converse(ctx context.Context, wav []byte, webSearch bool) (con
 		DisplayText:    display,
 		SpeechText:     speech,
 		AudioWAVBase64: base64.StdEncoding.EncodeToString(audio),
-		Sources:        sources,
 	}, nil
 }
 
@@ -114,18 +106,14 @@ func (s *service) transcribe(ctx context.Context, wav []byte) (string, error) {
 }
 
 func (s *service) reply(ctx context.Context, transcript string) (string, error) {
-	return s.complete(ctx, systemPrompt, transcript, 160)
-}
-
-func (s *service) complete(ctx context.Context, instruction, input string, maxTokens int) (string, error) {
 	request := struct {
 		Model           string        `json:"model"`
 		Messages        []chatMessage `json:"messages"`
 		ReasoningEffort string        `json:"reasoning_effort"`
 		MaxTokens       int           `json:"max_tokens"`
 		Stream          bool          `json:"stream"`
-	}{Model: s.config.LLMModel, ReasoningEffort: "none", MaxTokens: maxTokens}
-	request.Messages = []chatMessage{{"system", instruction}, {"user", input}}
+	}{Model: s.config.LLMModel, ReasoningEffort: "none", MaxTokens: 160}
+	request.Messages = []chatMessage{{"system", systemPrompt}, {"user", transcript}}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return "", &stageError{"llm_failed", http.StatusBadGateway}

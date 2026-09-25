@@ -1,13 +1,11 @@
 type Availability = "ready" | "model_unloaded" | "unavailable";
-type Config = { deadlineMs: number; maxAudioBytes: number; searchAvailable: boolean };
+type Config = { deadlineMs: number; maxAudioBytes: number };
 type Status = { lemonade: Availability; voicevoxReady: boolean };
-type Source = { title: string; url: string; publishedAt?: string; retrievedAt: string };
 type Conversation = {
   transcript: string;
   displayText: string;
   speechText: string;
   audioWavBase64: string;
-  sources?: Source[];
 };
 
 const recordButton = document.querySelector<HTMLButtonElement>("#record")!;
@@ -17,12 +15,8 @@ const answer = document.querySelector<HTMLElement>("#answer")!;
 const transcript = document.querySelector<HTMLElement>("#transcript")!;
 const reply = document.querySelector<HTMLElement>("#reply")!;
 const audio = document.querySelector<HTMLAudioElement>("#audio")!;
-const searchOption = document.querySelector<HTMLElement>("#search-option")!;
-const webSearch = document.querySelector<HTMLInputElement>("#web-search")!;
-const sources = document.querySelector<HTMLElement>("#sources")!;
-const sourceList = document.querySelector<HTMLUListElement>("#source-list")!;
 
-let config: Config = { deadlineMs: 120_000, maxAudioBytes: 2 * 1024 * 1024, searchAvailable: false };
+let config: Config = { deadlineMs: 120_000, maxAudioBytes: 2 * 1024 * 1024 };
 let currentStatus: Status = { lemonade: "unavailable", voicevoxReady: false };
 let recorder: MediaRecorder | null = null;
 let stream: MediaStream | null = null;
@@ -46,7 +40,6 @@ const messages: Record<string, string> = {
 function setState(message: string): void { state.textContent = message; }
 
 function updateButton(): void {
-  webSearch.disabled = busy || recorder?.state === "recording";
   if (recorder?.state === "recording") {
     recordButton.disabled = false;
     recordButton.textContent = "録音を止める";
@@ -134,7 +127,7 @@ async function sendWAV(wav: Blob): Promise<void> {
   try {
     const response = await fetch("/api/conversation", {
       method: "POST",
-      headers: { "Content-Type": "audio/wav", "X-Butako-Web-Search": webSearch.checked ? "1" : "0" },
+      headers: { "Content-Type": "audio/wav" },
       body: wav,
       signal: controller.signal,
     });
@@ -145,23 +138,6 @@ async function sendWAV(wav: Blob): Promise<void> {
     const result = await response.json() as Conversation;
     transcript.textContent = result.transcript;
     reply.textContent = result.displayText;
-    sourceList.replaceChildren();
-    for (const item of result.sources || []) {
-      let sourceURL: URL;
-      try { sourceURL = new URL(item.url); } catch { continue; }
-      if (sourceURL.protocol !== "http:" && sourceURL.protocol !== "https:") continue;
-      const row = document.createElement("li");
-      const link = document.createElement("a");
-      link.href = sourceURL.href;
-      link.textContent = item.title;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      const time = document.createElement("small");
-      time.textContent = `確認: ${new Date(item.retrievedAt).toLocaleString("ja-JP")}${item.publishedAt ? ` / 公開: ${item.publishedAt}` : ""}`;
-      row.append(link, time);
-      sourceList.append(row);
-    }
-    sources.hidden = sourceList.childElementCount === 0;
     if (audioURL) URL.revokeObjectURL(audioURL);
     audioURL = URL.createObjectURL(decodeBase64WAV(result.audioWavBase64));
     audio.src = audioURL;
@@ -175,15 +151,13 @@ async function sendWAV(wav: Blob): Promise<void> {
 
 async function handleRecording(chunksToProcess: Blob[], mimeType: string): Promise<void> {
   busy = true;
-  answer.hidden = true;
-  sources.hidden = true;
   updateButton();
   try {
     if (performance.now() - startedAt < 500) throw new Error("silence");
     setState("録音を変換しています…");
     const wav = await convertToWAV(new Blob(chunksToProcess, { type: mimeType }));
     if (wav.size > config.maxAudioBytes) throw new Error("audio_too_large");
-    setState(webSearch.checked ? "ブタコが調べています…" : "ブタコが考えています…");
+    setState("ブタコが考えています…");
     await sendWAV(wav);
   } catch (error) {
     const code = error instanceof Error ? error.message : "network_error";
@@ -243,7 +217,6 @@ void (async () => {
     const response = await fetch("/api/config", { cache: "no-store" });
     if (response.ok) config = await response.json() as Config;
   } catch { /* Server defaults match the UI defaults. */ }
-  searchOption.hidden = !config.searchAvailable;
   await pollStatus();
   setState("ボタンを押して話しかけてね。");
   window.setInterval(() => void pollStatus(), 10_000);

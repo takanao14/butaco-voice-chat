@@ -12,14 +12,13 @@ const (
 )
 
 type Config struct {
-	LemonadeURL  string
-	VoicevoxURL  string
-	SearchMCPURL string
-	ASRModel     string
-	LLMModel     string
-	Speaker      int
-	Deadline     time.Duration
-	StaticDir    string
+	LemonadeURL string
+	VoicevoxURL string
+	ASRModel    string
+	LLMModel    string
+	Speaker     int
+	Deadline    time.Duration
+	StaticDir   string
 }
 
 func ConfigFromEnv() Config {
@@ -32,14 +31,13 @@ func ConfigFromEnv() Config {
 		deadline = time.Duration(value) * time.Second
 	}
 	return Config{
-		LemonadeURL:  env("LEMONADE_URL", "https://lemonade.prd.butaco.net"),
-		VoicevoxURL:  env("VOICEVOX_URL", "http://127.0.0.1:50021"),
-		SearchMCPURL: os.Getenv("SEARCH_MCP_URL"),
-		ASRModel:     env("ASR_MODEL", "Whisper-Small"),
-		LLMModel:     env("LLM_MODEL", "Gemma-4-12B-it-MTP-GGUF"),
-		Speaker:      speaker,
-		Deadline:     deadline,
-		StaticDir:    env("STATIC_DIR", "dist/public"),
+		LemonadeURL: env("LEMONADE_URL", "https://lemonade.prd.butaco.net"),
+		VoicevoxURL: env("VOICEVOX_URL", "http://127.0.0.1:50021"),
+		ASRModel:    env("ASR_MODEL", "Whisper-Small"),
+		LLMModel:    env("LLM_MODEL", "Gemma-4-12B-it-MTP-GGUF"),
+		Speaker:     speaker,
+		Deadline:    deadline,
+		StaticDir:   env("STATIC_DIR", "dist/public"),
 	}
 }
 
