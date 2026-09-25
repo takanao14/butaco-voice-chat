@@ -24,10 +24,9 @@
       "pinDigests": false
     },
     {
-      "description": "Keep the web build on the Node.js 22 LTS line; a new major is a deliberate change.",
-      "matchDatasources": ["docker", "node-version"],
-      "matchPackageNames": ["node"],
-      "allowedVersions": "<23"
+      "description": "Keep the web build on the Node.js 24 LTS line in both the Dockerfile and CI; a new major is a deliberate change. matchDepNames also covers setup-node, whose package name is actions/node-versions.",
+      "matchDepNames": ["node"],
+      "allowedVersions": "<25"
     },
     {
       "description": "Group the Dockerfile base images so builder and runtime Alpine updates are tested together.",

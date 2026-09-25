@@ -7,7 +7,7 @@ for the request and does not write request bodies or prompts to application logs
 
 ## Local development
 
-Requires Go 1.22+, Node.js 22+, and Docker on an ARM64 Mac. VOICEVOX's official
+Requires Go 1.22+, Node.js 24+, and Docker on an ARM64 Mac. VOICEVOX's official
 CPU image is pinned by version and digest in `compose.yaml`.
 
 ```sh
