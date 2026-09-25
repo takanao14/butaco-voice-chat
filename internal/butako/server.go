@@ -115,24 +115,98 @@ func (s *service) conversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_history")
 		return
 	}
-	result, err := s.converse(ctx, body, history)
+	text, err := s.prepare(ctx, body, history)
 	if err != nil {
-		var stage *stageError
-		if errors.As(err, &stage) {
-			writeError(w, stage.status, stage.code)
-		} else {
-			writeError(w, http.StatusBadGateway, "conversation_failed")
-		}
+		writeStageError(w, err)
 		return
 	}
-	encoded, err := json.Marshal(result)
-	if err != nil || len(encoded) > maxResponseBytes {
+	sentences := splitSentences(text.SpeechText)
+	first, err := s.synthesize(ctx, sentences[0])
+	if err != nil {
+		writeStageError(w, err)
+		return
+	}
+	// Failures up to the first sentence use HTTP status codes; after the
+	// stream starts they are sent as an error event.
+	firstAudio := base64.StdEncoding.EncodeToString(first)
+	if len(firstAudio) > maxResponseBytes {
 		writeError(w, http.StatusBadGateway, "response_too_large")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	stream := startStream(w)
+	stream.send(streamEvent{Type: "text", Transcript: text.Transcript, DisplayText: text.DisplayText, SpeechText: text.SpeechText, Parts: len(sentences)})
+	stream.send(streamEvent{Type: "audio", Index: 0, AudioWAVBase64: firstAudio})
+	total := len(firstAudio)
+	for i, sentence := range sentences[1:] {
+		audio, err := s.synthesize(ctx, sentence)
+		if err != nil {
+			stream.fail(err)
+			return
+		}
+		encoded := base64.StdEncoding.EncodeToString(audio)
+		if total += len(encoded); total > maxResponseBytes {
+			stream.fail(&stageError{"response_too_large", http.StatusBadGateway})
+			return
+		}
+		stream.send(streamEvent{Type: "audio", Index: i + 1, AudioWAVBase64: encoded})
+	}
+	stream.send(streamEvent{Type: "done"})
+}
+
+// streamEvent is one NDJSON line of a conversation response: "text" first,
+// then one "audio" per sentence, and "done" or "error" last.
+type streamEvent struct {
+	Type           string            `json:"type"`
+	Transcript     string            `json:"transcript,omitempty"`
+	DisplayText    string            `json:"displayText,omitempty"`
+	SpeechText     string            `json:"speechText,omitempty"`
+	Parts          int               `json:"parts,omitempty"`
+	Index          int               `json:"index"`
+	AudioWAVBase64 string            `json:"audioWavBase64,omitempty"`
+	Error          map[string]string `json:"error,omitempty"`
+}
+
+type eventStream struct {
+	w       http.ResponseWriter
+	encoder *json.Encoder
+	flusher http.Flusher
+}
+
+func startStream(w http.ResponseWriter) *eventStream {
+	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(encoded)
+	flusher, _ := w.(http.Flusher)
+	return &eventStream{w: w, encoder: json.NewEncoder(w), flusher: flusher}
+}
+
+func (s *eventStream) send(event streamEvent) {
+	_ = s.encoder.Encode(event)
+	if s.flusher != nil {
+		s.flusher.Flush()
+	}
+}
+
+func (s *eventStream) fail(err error) {
+	s.send(streamEvent{Type: "error", Error: map[string]string{"code": stageCode(err)}})
+}
+
+func stageCode(err error) string {
+	var stage *stageError
+	if errors.As(err, &stage) {
+		return stage.code
+	}
+	return "conversation_failed"
+}
+
+func writeStageError(w http.ResponseWriter, err error) {
+	var stage *stageError
+	if errors.As(err, &stage) {
+		writeError(w, stage.status, stage.code)
+		return
+	}
+	writeError(w, http.StatusBadGateway, "conversation_failed")
 }
 
 const (

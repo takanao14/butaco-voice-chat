@@ -3,7 +3,6 @@ package butako
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,11 +15,11 @@ import (
 	"time"
 )
 
-type conversationResult struct {
-	Transcript     string `json:"transcript"`
-	DisplayText    string `json:"displayText"`
-	SpeechText     string `json:"speechText"`
-	AudioWAVBase64 string `json:"audioWavBase64"`
+// replyText is one turn before speech synthesis.
+type replyText struct {
+	Transcript  string
+	DisplayText string
+	SpeechText  string
 }
 
 type chatMessage struct {
@@ -53,32 +52,25 @@ type Turn struct {
 	Assistant string `json:"assistant"`
 }
 
-func (s *service) converse(ctx context.Context, wav []byte, history []Turn) (conversationResult, error) {
+// prepare runs speech recognition and the reply; synthesis is streamed
+// sentence by sentence by the handler.
+func (s *service) prepare(ctx context.Context, wav []byte, history []Turn) (replyText, error) {
 	transcript, err := s.transcribe(ctx, wav)
 	if err != nil {
-		return conversationResult{}, err
+		return replyText{}, err
 	}
 	if emptyOrHallucinated(transcript, s.config.Character.Hallucinations) {
-		return conversationResult{}, &stageError{"silence", http.StatusUnprocessableEntity}
+		return replyText{}, &stageError{"silence", http.StatusUnprocessableEntity}
 	}
 	display, err := s.reply(ctx, history, transcript)
 	if err != nil {
-		return conversationResult{}, err
+		return replyText{}, err
 	}
 	speech := speechText(s.speech, display)
 	if speech == "" {
-		return conversationResult{}, &stageError{"llm_failed", http.StatusBadGateway}
+		return replyText{}, &stageError{"llm_failed", http.StatusBadGateway}
 	}
-	audio, err := s.synthesize(ctx, speech)
-	if err != nil {
-		return conversationResult{}, err
-	}
-	return conversationResult{
-		Transcript:     transcript,
-		DisplayText:    display,
-		SpeechText:     speech,
-		AudioWAVBase64: base64.StdEncoding.EncodeToString(audio),
-	}, nil
+	return replyText{Transcript: transcript, DisplayText: display, SpeechText: speech}, nil
 }
 
 func (s *service) transcribe(ctx context.Context, wav []byte) (string, error) {

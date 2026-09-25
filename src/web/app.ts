@@ -1,12 +1,14 @@
 type Availability = "ready" | "model_unloaded" | "unavailable";
 type Config = { deadlineMs: number; maxAudioBytes: number; name: string; credit: string };
 type Status = { lemonade: Availability; voicevoxReady: boolean };
-type Conversation = {
-  transcript: string;
-  displayText: string;
-  speechText: string;
-  audioWavBase64: string;
-};
+// NDJSON events from /api/conversation: "text" first, one "audio" per
+// sentence, then "done" or "error".
+type StreamEvent =
+  | { type: "text"; transcript: string; displayText: string; speechText: string; parts: number }
+  | { type: "audio"; index: number; audioWavBase64: string }
+  | { type: "done" }
+  | { type: "error"; error: { code: string } };
+type PlayOutcome = "played" | "blocked" | "stopped";
 
 const recordButton = document.querySelector<HTMLButtonElement>("#record")!;
 const availability = document.querySelector<HTMLElement>("#availability")!;
@@ -27,6 +29,11 @@ let chunks: Blob[] = [];
 let startedAt = 0;
 let busy = false;
 let audioURL: string | null = null;
+// Sentences play through this element; the visible #audio holds the whole
+// reply for replay once every sentence has arrived.
+const player = new Audio();
+let playing = false;
+let stopPlaying: (() => void) | null = null;
 let stopRecording: ((reason: "manual" | "hidden") => void) | null = null;
 // One context for the page, created on the first tap: iOS Safari keeps
 // contexts created without a user gesture suspended.
@@ -71,6 +78,7 @@ function applyCharacter(): void {
 
 function clearAnswer(): void {
   audio.pause();
+  audio.hidden = true;
   audio.removeAttribute("src");
   audio.load();
   if (audioURL) URL.revokeObjectURL(audioURL);
@@ -81,6 +89,12 @@ function clearAnswer(): void {
 }
 
 function updateButton(): void {
+  if (playing) {
+    recordButton.disabled = false;
+    recordButton.classList.remove("recording");
+    recordButton.textContent = conversing ? "会話を終える" : "再生を止める";
+    return;
+  }
   if (recorder?.state === "recording") {
     recordButton.disabled = false;
     recordButton.textContent = "録音を止める";
@@ -188,10 +202,84 @@ function encodeHistory(items: Turn[]): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-// sendWAV returns whether the reply started playing on its own.
-async function sendWAV(wav: Blob): Promise<boolean> {
+async function* readEvents(response: Response): AsyncGenerator<StreamEvent> {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (value) buffered += decoder.decode(value, { stream: true });
+    let newline: number;
+    while ((newline = buffered.indexOf("\n")) >= 0) {
+      const line = buffered.slice(0, newline).trim();
+      buffered = buffered.slice(newline + 1);
+      if (line) yield JSON.parse(line) as StreamEvent;
+    }
+    if (done) {
+      if (buffered.trim()) yield JSON.parse(buffered) as StreamEvent;
+      return;
+    }
+  }
+}
+
+// playPart plays one sentence and reports whether it finished, was stopped
+// from the button, or could not start (autoplay refused).
+async function playPart(blob: Blob): Promise<"ended" | "stopped" | "blocked"> {
+  const url = URL.createObjectURL(blob);
+  try {
+    player.src = url;
+    const finished = new Promise<"ended" | "stopped">(resolve => {
+      player.onended = () => resolve("ended");
+      stopPlaying = () => { player.pause(); resolve("stopped"); };
+    });
+    try {
+      await player.play();
+    } catch {
+      return "blocked";
+    }
+    return await finished;
+  } finally {
+    player.onended = null;
+    stopPlaying = null;
+    URL.revokeObjectURL(url);
+  }
+}
+
+// concatWAV joins the sentence WAVs (same format) into one file for replay.
+function concatWAV(parts: ArrayBuffer[]): Blob {
+  let format: Uint8Array | null = null;
+  const samples: Uint8Array[] = [];
+  for (const part of parts) {
+    const view = new DataView(part);
+    for (let offset = 12; offset + 8 <= part.byteLength;) {
+      const id = String.fromCharCode(...new Uint8Array(part, offset, 4));
+      const size = view.getUint32(offset + 4, true);
+      const length = Math.min(size, part.byteLength - offset - 8);
+      if (id === "fmt ") format ??= new Uint8Array(part, offset + 8, 16);
+      if (id === "data") samples.push(new Uint8Array(part, offset + 8, length));
+      offset += 8 + size + (size % 2);
+    }
+  }
+  const dataSize = samples.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  const out = new Uint8Array(44 + dataSize);
+  const view = new DataView(out.buffer);
+  const label = (offset: number, value: string): void => {
+    for (let i = 0; i < value.length; i++) out[offset + i] = value.charCodeAt(i);
+  };
+  label(0, "RIFF"); view.setUint32(4, out.byteLength - 8, true);
+  label(8, "WAVE"); label(12, "fmt "); view.setUint32(16, 16, true);
+  if (format) out.set(format, 20);
+  label(36, "data"); view.setUint32(40, dataSize, true);
+  let offset = 44;
+  for (const chunk of samples) { out.set(chunk, offset); offset += chunk.byteLength; }
+  return new Blob([out], { type: "audio/wav" });
+}
+
+// sendWAV plays each sentence as it arrives and reports how playback ended.
+async function sendWAV(wav: Blob): Promise<PlayOutcome> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), config.deadlineMs);
+  const parts: ArrayBuffer[] = [];
   try {
     const headers: Record<string, string> = { "Content-Type": "audio/wav" };
     const recent = recentHistory();
@@ -206,22 +294,45 @@ async function sendWAV(wav: Blob): Promise<boolean> {
       const failure = await response.json().catch(() => null) as { error?: { code?: string } } | null;
       throw new Error(failure?.error?.code || "network_error");
     }
-    const result = await response.json() as Conversation;
-    remember(result.transcript, result.displayText);
-    transcript.textContent = result.transcript;
-    reply.textContent = result.displayText;
-    audioURL = URL.createObjectURL(decodeBase64WAV(result.audioWavBase64));
-    audio.src = audioURL;
-    answer.hidden = false;
-    setState(conversing ? "返事を再生しています…" : "返事ができました。再生ボタンから聞いてね。");
-    try {
-      await audio.play();
-      return true;
-    } catch {
-      return false; // Safari may require another tap.
+    let outcome: PlayOutcome = "played";
+    let failure: string | null = null;
+    for await (const event of readEvents(response)) {
+      if (event.type === "text") {
+        remember(event.transcript, event.displayText);
+        transcript.textContent = event.transcript;
+        reply.textContent = event.displayText;
+        answer.hidden = false;
+        setState("返事を再生しています…");
+      } else if (event.type === "audio") {
+        const blob = decodeBase64WAV(event.audioWavBase64);
+        parts.push(await blob.arrayBuffer());
+        if (outcome !== "played") continue; // keep collecting for replay
+        playing = true;
+        updateButton();
+        const result = await playPart(blob);
+        if (result === "blocked") outcome = "blocked";
+        if (result === "stopped") {
+          outcome = "stopped";
+          controller.abort();
+          break;
+        }
+      } else if (event.type === "error") {
+        failure = event.error.code;
+        break;
+      } else {
+        break;
+      }
     }
+    if (failure) throw new Error(failure);
+    return outcome;
   } finally {
     window.clearTimeout(timeout);
+    playing = false;
+    if (parts.length) {
+      audioURL = URL.createObjectURL(concatWAV(parts));
+      audio.src = audioURL;
+      audio.hidden = false;
+    }
   }
 }
 
@@ -296,7 +407,7 @@ function endConversation(message?: string): void {
 async function handleRecording(chunksToProcess: Blob[], mimeType: string, reason: StopReason): Promise<boolean> {
   busy = true;
   updateButton();
-  let played = false;
+  let outcome: PlayOutcome | null = null;
   try {
     if (reason === "hidden") {
       endConversation("画面を離れたので会話を終わったよ。");
@@ -311,8 +422,10 @@ async function handleRecording(chunksToProcess: Blob[], mimeType: string, reason
     const wav = await convertToWAV(new Blob(chunksToProcess, { type: mimeType }));
     if (wav.size > config.maxAudioBytes) throw new Error("audio_too_large");
     setState(`${config.name}が考えています…`);
-    played = await sendWAV(wav);
-    if (conversing && !played) endConversation("返事ができました。再生ボタンから聞いてね。");
+    outcome = await sendWAV(wav);
+    if (outcome === "blocked") endConversation("返事ができました。再生ボタンから聞いてね。");
+    else if (outcome === "stopped") endConversation(conversing ? "会話を終わったよ。ボタンを押すとまた話せるよ。" : "再生を止めたよ。");
+    else if (!conversing) setState("返事ができました。もう一度聞くときは再生ボタンを押してね。");
   } catch (error) {
     const code = error instanceof Error ? error.message : "network_error";
     endConversation();
@@ -323,28 +436,12 @@ async function handleRecording(chunksToProcess: Blob[], mimeType: string, reason
     await pollStatus();
     updateButton();
   }
-  return conversing && played;
+  return conversing && outcome === "played";
 }
 
-// Wait for the reply to finish, then listen again. Pausing the reply or
-// leaving the page ends conversation mode.
+// Listen again after a reply has finished playing, unless the page was left.
 async function continueConversation(): Promise<void> {
-  if (!audio.ended) {
-    await new Promise<void>(resolve => {
-      const done = (): void => {
-        audio.removeEventListener("ended", done);
-        audio.removeEventListener("pause", done);
-        resolve();
-      };
-      audio.addEventListener("ended", done);
-      audio.addEventListener("pause", done);
-    });
-  }
   if (!conversing) return;
-  if (!audio.ended) {
-    endConversation("再生を止めたので会話を終わったよ。");
-    return;
-  }
   if (document.visibilityState !== "visible" || recordButton.disabled) {
     endConversation("会話を終わったよ。ボタンを押すとまた話せるよ。");
     return;
@@ -414,6 +511,10 @@ async function startRecording(): Promise<void> {
 }
 
 recordButton.addEventListener("click", () => {
+  if (playing) {
+    stopPlaying?.();
+    return;
+  }
   if (recorder?.state === "recording") {
     stopRecording?.("manual");
     return;

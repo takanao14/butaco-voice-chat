@@ -83,17 +83,105 @@ func errorCode(t *testing.T, recorder *httptest.ResponseRecorder) string {
 	return body.Error.Code
 }
 
+func readStream(t *testing.T, recorder *httptest.ResponseRecorder) []streamEvent {
+	t.Helper()
+	if got := recorder.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/x-ndjson") {
+		t.Fatalf("content type = %q", got)
+	}
+	var events []streamEvent
+	decoder := json.NewDecoder(recorder.Body)
+	for decoder.More() {
+		var event streamEvent
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+	}
+	return events
+}
+
+func eventTypes(events []streamEvent) string {
+	var types []string
+	for _, event := range events {
+		types = append(types, event.Type)
+	}
+	return strings.Join(types, ",")
+}
+
 func TestConversationSuccess(t *testing.T) {
 	recorder := postConversation(newTestHandler(t, upstream{}), "audio/wav", testWAV(16000, 0.3))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body)
 	}
-	var result conversationResult
-	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
-		t.Fatal(err)
+	events := readStream(t, recorder)
+	if eventTypes(events) != "text,audio,done" {
+		t.Fatalf("events = %s", eventTypes(events))
 	}
-	if result.Transcript != "ブタコ、元気？" || result.SpeechText != "フゴー、元気だよ！" || result.AudioWAVBase64 == "" {
-		t.Fatalf("unexpected result: %+v", result)
+	if events[0].Transcript != "ブタコ、元気？" || events[0].SpeechText != "フゴー、元気だよ！" || events[0].Parts != 1 || events[1].AudioWAVBase64 == "" {
+		t.Fatalf("unexpected events: %+v", events[:2])
+	}
+}
+
+func TestConversationStreamsSentences(t *testing.T) {
+	var spoken []string
+	fake := upstream{
+		chat: respond(200, `{"choices":[{"message":{"content":"フゴー。前の試合は負けちゃったよ。次はリーズ戦だね！絶対に勝ってほしいな。"}}]}`),
+		audioQuery: func(w http.ResponseWriter, r *http.Request) {
+			spoken = append(spoken, r.URL.Query().Get("text"))
+			_, _ = io.WriteString(w, `{}`)
+		},
+	}
+	recorder := postConversation(newTestHandler(t, fake), "audio/wav", testWAV(16000, 0.3))
+	events := readStream(t, recorder)
+	if eventTypes(events) != "text,audio,audio,audio,done" || events[0].Parts != 3 {
+		t.Fatalf("events = %s, parts = %d", eventTypes(events), events[0].Parts)
+	}
+	for i, event := range events[1:4] {
+		if event.Index != i {
+			t.Errorf("audio %d has index %d", i, event.Index)
+		}
+	}
+	want := []string{"フゴー。前の試合は負けちゃったよ。", "次はリーズ戦だね！", "絶対に勝ってほしいな。"}
+	if strings.Join(spoken, "|") != strings.Join(want, "|") {
+		t.Fatalf("spoken = %q", spoken)
+	}
+}
+
+func TestConversationStreamReportsLaterFailure(t *testing.T) {
+	calls := 0
+	fake := upstream{
+		chat: respond(200, `{"choices":[{"message":{"content":"前の試合は負けちゃったよ。次はリーズ戦だね。"}}]}`),
+		synthesis: func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			if calls++; calls > 1 {
+				http.Error(w, "boom", http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write(testWAV(1600, 0.3))
+		},
+	}
+	recorder := postConversation(newTestHandler(t, fake), "audio/wav", testWAV(16000, 0.3))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	events := readStream(t, recorder)
+	if eventTypes(events) != "text,audio,error" || events[2].Error["code"] != "tts_failed" {
+		t.Fatalf("events = %s, last = %+v", eventTypes(events), events[len(events)-1])
+	}
+}
+
+func TestSplitSentences(t *testing.T) {
+	for text, want := range map[string][]string{
+		"フゴー、元気だよ！": {"フゴー、元気だよ！"},
+		"フゴー。前の試合は負けちゃったよ。次はリーズ戦だね！楽しみだな。": {"フゴー。前の試合は負けちゃったよ。", "次はリーズ戦だね！楽しみだな。"},
+		"長い文だけど句点がないまま終わる":                 {"長い文だけど句点がないまま終わる"},
+		"前の試合は負けちゃったよ。フゴー":                 {"前の試合は負けちゃったよ。フゴー"},
+		"Is it good? Yes!":               {"Is it good? Yes!"},
+		"Is it really good? Yes, it is!": {"Is it really good?", "Yes, it is!"},
+	} {
+		if got := splitSentences(text); strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Errorf("splitSentences(%q) = %q, want %q", text, got, want)
+		}
 	}
 }
 

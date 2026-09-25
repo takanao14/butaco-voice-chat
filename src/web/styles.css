@@ -32,6 +32,7 @@ h1 { margin: 0; font-size: 1.65rem; line-height: 1.3; }
 .line p { margin: 0; line-height: 1.7; overflow-wrap: anywhere; }
 .line .label { margin-bottom: .3rem; font-size: .8rem; font-weight: 700; color: #9b625a; }
 audio { display: block; width: 100%; margin-top: 1.25rem; }
+audio[hidden] { display: none; }
 footer { margin-top: 1.5rem; text-align: center; font-size: .8rem; color: #786d68; }
 
 @keyframes pulse { 50% { box-shadow: 0 0 0 .5rem #b3475626; } }
