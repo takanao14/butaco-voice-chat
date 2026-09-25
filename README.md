@@ -43,6 +43,8 @@ unexpired ID from `web_search`, limits HTML downloads to 1 MiB, and blocks
 private or local destination addresses. Search queries are sent to SearXNG,
 which forwards them to its configured external engines. The server does not
 log queries or article text. `Dockerfile.search` builds its separate image.
+Pushing a `v*` tag publishes both the voice image and the separate
+`ghcr.io/takanao14/butaco-voice-chat-search` image with that tag.
 
 Set `SEARCH_MCP_URL` on the voice API to the server's full MCP endpoint, for
 example `http://butako-search:8081/mcp`. The Safari UI then offers a web search
