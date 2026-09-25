@@ -25,6 +25,9 @@ let startedAt = 0;
 let busy = false;
 let audioURL: string | null = null;
 
+const idleMessage = "ボタンを押して話しかけてね。";
+const waitingMessage = "準備ができるまで少し待ってね。";
+
 const messages: Record<string, string> = {
   silence: "声が聞き取れませんでした。もう一度話してね。",
   invalid_audio: "録音を処理できませんでした。もう一度試してね。",
@@ -38,6 +41,17 @@ const messages: Record<string, string> = {
 };
 
 function setState(message: string): void { state.textContent = message; }
+
+function clearAnswer(): void {
+  audio.pause();
+  audio.removeAttribute("src");
+  audio.load();
+  if (audioURL) URL.revokeObjectURL(audioURL);
+  audioURL = null;
+  transcript.textContent = "";
+  reply.textContent = "";
+  answer.hidden = true;
+}
 
 function updateButton(): void {
   if (recorder?.state === "recording") {
@@ -53,14 +67,18 @@ function updateButton(): void {
 
 async function pollStatus(): Promise<void> {
   if (busy || recorder?.state === "recording") return;
+  let serverReachable = true;
   try {
     const response = await fetch("/api/status", { cache: "no-store" });
     if (!response.ok) throw new Error("status failed");
     currentStatus = await response.json() as Status;
   } catch {
+    serverReachable = false;
     currentStatus = { lemonade: "unavailable", voicevoxReady: false };
   }
-  if (currentStatus.lemonade === "unavailable") {
+  if (!serverReachable) {
+    availability.textContent = "ブタコのサーバーに接続できません";
+  } else if (currentStatus.lemonade === "unavailable") {
     availability.textContent = "Lemonade 利用不可（GPU 別用途または起動中）";
   } else if (!currentStatus.voicevoxReady) {
     availability.textContent = "音声合成を準備中です";
@@ -70,6 +88,8 @@ async function pollStatus(): Promise<void> {
     availability.textContent = "会話できます";
   }
   updateButton();
+  if (recordButton.disabled) setState(waitingMessage);
+  else if (state.textContent === waitingMessage) setState(idleMessage);
 }
 
 function encodeWAV(samples: Float32Array): Blob {
@@ -138,7 +158,6 @@ async function sendWAV(wav: Blob): Promise<void> {
     const result = await response.json() as Conversation;
     transcript.textContent = result.transcript;
     reply.textContent = result.displayText;
-    if (audioURL) URL.revokeObjectURL(audioURL);
     audioURL = URL.createObjectURL(decodeBase64WAV(result.audioWavBase64));
     audio.src = audioURL;
     answer.hidden = false;
@@ -172,6 +191,7 @@ async function handleRecording(chunksToProcess: Blob[], mimeType: string): Promi
 
 async function startRecording(): Promise<void> {
   busy = true;
+  clearAnswer();
   updateButton();
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -217,7 +237,7 @@ void (async () => {
     const response = await fetch("/api/config", { cache: "no-store" });
     if (response.ok) config = await response.json() as Config;
   } catch { /* Server defaults match the UI defaults. */ }
+  setState(idleMessage);
   await pollStatus();
-  setState("ボタンを押して話しかけてね。");
   window.setInterval(() => void pollStatus(), 10_000);
 })();
