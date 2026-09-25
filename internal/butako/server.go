@@ -23,7 +23,14 @@ func NewHandler(config Config) http.Handler {
 	})
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("POST /api/conversation", s.conversation)
-	mux.Handle("GET /", http.FileServer(http.Dir(config.StaticDir)))
+	staticFiles := http.FileServer(http.Dir(config.StaticDir))
+	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		r.Header.Del("If-Modified-Since")
+		r.Header.Del("If-None-Match")
+		staticFiles.ServeHTTP(w, r)
+	}))
 	return mux
 }
 
