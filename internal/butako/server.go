@@ -17,8 +17,9 @@ func NewHandler(config Config) http.Handler {
 	})
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"deadlineMs":    config.Deadline.Milliseconds(),
-			"maxAudioBytes": maxAudioBytes,
+			"deadlineMs":      config.Deadline.Milliseconds(),
+			"maxAudioBytes":   maxAudioBytes,
+			"searchAvailable": config.SearchMCPURL != "",
 		})
 	})
 	mux.HandleFunc("GET /api/status", s.status)
@@ -91,7 +92,7 @@ func (s *service) conversation(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	result, err := s.converse(ctx, body)
+	result, err := s.converse(ctx, body, r.Header.Get("X-Butako-Web-Search") == "1")
 	if err != nil {
 		var stage *stageError
 		if errors.As(err, &stage) {

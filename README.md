@@ -44,4 +44,10 @@ private or local destination addresses. Search queries are sent to SearXNG,
 which forwards them to its configured external engines. The server does not
 log queries or article text. `Dockerfile.search` builds its separate image.
 
-The voice conversation does not call this server yet.
+Set `SEARCH_MCP_URL` on the voice API to the server's full MCP endpoint, for
+example `http://butako-search:8081/mcp`. The Safari UI then offers a web search
+checkbox. Saying "調べて" also requests a search. The API sends only a locally
+generated short query to the search service, reads selected result pages, and
+returns the cited sources alongside the spoken answer. If search is unavailable,
+the app says it cannot confirm current information; ordinary conversation still
+uses the original local path.
