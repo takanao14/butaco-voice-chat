@@ -7,6 +7,6 @@
     "build": "tsc -p tsconfig.web.json && cp src/web/index.html src/web/styles.css dist/public/"
   },
   "devDependencies": {
-    "typescript": "^5.5.0"
+    "typescript": "^7.0.0"
   }
 }
