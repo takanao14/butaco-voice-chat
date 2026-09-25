@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.web.json && cp src/web/index.html src/web/styles.css dist/public/"
+    "build": "tsc -p tsconfig.web.json && cp src/web/index.html src/web/probe.html src/web/styles.css dist/public/"
   },
   "devDependencies": {
     "typescript": "^5.5.0"
