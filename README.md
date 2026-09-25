@@ -7,7 +7,7 @@ for the request and does not write request bodies or prompts to application logs
 
 ## Local development
 
-Requires Go 1.25+, Node.js 22+, and Docker on an ARM64 Mac. VOICEVOX's official
+Requires Go 1.22+, Node.js 22+, and Docker on an ARM64 Mac. VOICEVOX's official
 CPU image is pinned by version and digest in `compose.yaml`.
 
 ```sh
@@ -32,16 +32,3 @@ deadline (120 seconds by default). The browser obtains it from `/api/config`.
 VOICEVOX logs `audio_query` text by default. The development container's
 stdout and stderr are discarded so those access lines are not retained. The
 production VOICEVOX deployment must apply the same privacy constraint.
-
-## Search MCP server
-
-`cmd/butako-search` is a separate internal service. Set `SEARXNG_URL` to a
-SearXNG origin with JSON search enabled and run `go run ./cmd/butako-search`.
-It serves Streamable HTTP MCP at `/mcp` on port 8081 (`PORT` overrides this)
-and exposes `web_search` and `read_search_result`. The latter accepts only an
-unexpired ID from `web_search`, limits HTML downloads to 1 MiB, and blocks
-private or local destination addresses. Search queries are sent to SearXNG,
-which forwards them to its configured external engines. The server does not
-log queries or article text. `Dockerfile.search` builds its separate image.
-
-The voice conversation does not call this server yet.
