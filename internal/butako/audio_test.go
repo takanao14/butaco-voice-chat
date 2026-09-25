@@ -65,20 +65,21 @@ func TestEmptyOrHallucinated(t *testing.T) {
 		"Thank you for watching!": true,
 		"ブタコ、元気？":                 false,
 	} {
-		if got := emptyOrHallucinated(text); got != want {
+		if got := emptyOrHallucinated(text, DefaultCharacter().Hallucinations); got != want {
 			t.Errorf("emptyOrHallucinated(%q) = %v, want %v", text, got, want)
 		}
 	}
 }
 
 func TestSpeechText(t *testing.T) {
+	replacer := DefaultCharacter().speechReplacer()
 	for display, want := range map[string]string{
 		"**フゴー**、元気だよ！🐷":        "フゴー、元気だよ！",
 		"Manchester United が好き": "マンチェスター・ユナイテッド が好き",
 		"# Butako\nです":          "ブタコ です",
 		"🐷✨":                    "",
 	} {
-		if got := speechText(display); got != want {
+		if got := speechText(replacer, display); got != want {
 			t.Errorf("speechText(%q) = %q, want %q", display, got, want)
 		}
 	}

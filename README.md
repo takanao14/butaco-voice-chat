@@ -29,6 +29,28 @@ and returns transcript, display text, speech text, and Base64 WAV in one JSON
 response. `CONVERSATION_DEADLINE_SECONDS` sets the shared API and browser
 deadline (120 seconds by default). The browser obtains it from `/api/config`.
 
+`CHARACTER_FILE` points to an optional JSON file that overrides the built-in
+Butako character. Omitted fields keep their defaults, unknown fields stop the
+server at startup, and the file is read once at startup:
+
+```json
+{
+  "name": "ブタコ",
+  "credit": "VOICEVOX:ずんだもん",
+  "systemPrompt": "あなたはブタのぬいぐるみ『ブタコ』です。…",
+  "asrPrompt": "ブタコ、フゴー、マンチェスター・ユナイテッド",
+  "speaker": 3,
+  "speechReplacements": [{"from": "Manchester United", "to": "マンチェスター・ユナイテッド"}],
+  "hallucinations": ["ご視聴ありがとうございました"]
+}
+```
+
+`name` and `credit` appear in the UI; keep `credit` in VOICEVOX's
+`VOICEVOX:<speaker name>` form for the selected `speaker`.
+`speechReplacements` rewrite the reply before synthesis, and transcripts
+matching `hallucinations` are treated as silence. The default values are in
+`internal/butako/character.go`.
+
 VOICEVOX logs `audio_query` text by default. The development container's
 stdout and stderr are discarded so those access lines are not retained. The
 production VOICEVOX deployment must apply the same privacy constraint.

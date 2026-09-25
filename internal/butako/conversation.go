@@ -15,9 +15,6 @@ import (
 	"strings"
 )
 
-const systemPrompt = "あなたはブタのぬいぐるみ『ブタコ』です。イギリス出身で、マンチェスター・ユナイテッドが好きです。日本語で自然に会話してください。『フゴフゴ』『フゴー』は自然な範囲で使ってください。音声で聞きやすい短い返答を原則2〜3文で作ってください。Markdown、絵文字、英字表記は使わないでください。"
-const asrPrompt = "ブタコ、フゴー、マンチェスター・ユナイテッド"
-
 type conversationResult struct {
 	Transcript     string `json:"transcript"`
 	DisplayText    string `json:"displayText"`
@@ -40,6 +37,7 @@ func (e *stageError) Error() string { return e.code }
 type service struct {
 	config Config
 	client *http.Client
+	speech *strings.Replacer
 }
 
 func (s *service) converse(ctx context.Context, wav []byte) (conversationResult, error) {
@@ -47,14 +45,14 @@ func (s *service) converse(ctx context.Context, wav []byte) (conversationResult,
 	if err != nil {
 		return conversationResult{}, err
 	}
-	if emptyOrHallucinated(transcript) {
+	if emptyOrHallucinated(transcript, s.config.Character.Hallucinations) {
 		return conversationResult{}, &stageError{"silence", http.StatusUnprocessableEntity}
 	}
 	display, err := s.reply(ctx, transcript)
 	if err != nil {
 		return conversationResult{}, err
 	}
-	speech := speechText(display)
+	speech := speechText(s.speech, display)
 	if speech == "" {
 		return conversationResult{}, &stageError{"llm_failed", http.StatusBadGateway}
 	}
@@ -76,7 +74,7 @@ func (s *service) transcribe(ctx context.Context, wav []byte) (string, error) {
 	for name, value := range map[string]string{
 		"model":    s.config.ASRModel,
 		"language": "ja",
-		"prompt":   asrPrompt,
+		"prompt":   s.config.Character.ASRPrompt,
 	} {
 		if err := form.WriteField(name, value); err != nil {
 			return "", &stageError{"asr_failed", http.StatusBadGateway}
@@ -113,7 +111,7 @@ func (s *service) reply(ctx context.Context, transcript string) (string, error) 
 		MaxTokens       int           `json:"max_tokens"`
 		Stream          bool          `json:"stream"`
 	}{Model: s.config.LLMModel, ReasoningEffort: "none", MaxTokens: 160}
-	request.Messages = []chatMessage{{"system", systemPrompt}, {"user", transcript}}
+	request.Messages = []chatMessage{{"system", s.config.Character.SystemPrompt}, {"user", transcript}}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return "", &stageError{"llm_failed", http.StatusBadGateway}
@@ -140,7 +138,8 @@ func (s *service) reply(ctx context.Context, transcript string) (string, error) 
 }
 
 func (s *service) synthesize(ctx context.Context, text string) ([]byte, error) {
-	query := url.Values{"text": {text}, "speaker": {strconv.Itoa(s.config.Speaker)}}
+	speaker := strconv.Itoa(s.config.Character.Speaker)
+	query := url.Values{"text": {text}, "speaker": {speaker}}
 	raw, err := s.post(ctx, s.config.VoicevoxURL, "/audio_query?"+query.Encode(), "application/json", nil, "tts_failed")
 	if err != nil {
 		return nil, err
@@ -148,7 +147,7 @@ func (s *service) synthesize(ctx context.Context, text string) ([]byte, error) {
 	if !json.Valid(raw) {
 		return nil, &stageError{"tts_failed", http.StatusBadGateway}
 	}
-	path := "/synthesis?speaker=" + strconv.Itoa(s.config.Speaker)
+	path := "/synthesis?speaker=" + speaker
 	audio, err := s.post(ctx, s.config.VoicevoxURL, path, "application/json", raw, "tts_failed")
 	if err != nil {
 		return nil, err

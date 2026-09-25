@@ -56,21 +56,23 @@ func validateWAV(data []byte) error {
 	return nil
 }
 
-func emptyOrHallucinated(text string) bool {
-	clean := strings.Trim(strings.TrimSpace(text), " \n\r\t。、.!！?？\"'「」")
-	switch clean {
-	case "", "ご視聴ありがとうございました", "字幕をご覧いただきありがとうございました", "Thank you for watching":
+const hallucinationTrim = " \n\r\t。、.!！?？\"'「」"
+
+func emptyOrHallucinated(text string, hallucinations []string) bool {
+	clean := strings.Trim(strings.TrimSpace(text), hallucinationTrim)
+	if clean == "" {
 		return true
+	}
+	for _, hallucination := range hallucinations {
+		if clean == strings.Trim(strings.TrimSpace(hallucination), hallucinationTrim) {
+			return true
+		}
 	}
 	return false
 }
 
-func speechText(display string) string {
-	text := strings.NewReplacer(
-		"Manchester United", "マンチェスター・ユナイテッド",
-		"Butako", "ブタコ",
-		"**", "", "__", "", "`", "", "#", "", "*", "",
-	).Replace(display)
+func speechText(replacer *strings.Replacer, display string) string {
+	text := replacer.Replace(display)
 	var clean strings.Builder
 	for _, r := range text {
 		if (r >= 0x1f000 && r <= 0x1faff) || (r >= 0x2600 && r <= 0x27bf) {

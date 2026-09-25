@@ -11,7 +11,7 @@ import (
 )
 
 func NewHandler(config Config) http.Handler {
-	s := &service{config: config, client: &http.Client{}}
+	s := &service{config: config, client: &http.Client{}, speech: config.Character.speechReplacer()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -20,6 +20,8 @@ func NewHandler(config Config) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"deadlineMs":    config.Deadline.Milliseconds(),
 			"maxAudioBytes": maxAudioBytes,
+			"name":          config.Character.Name,
+			"credit":        config.Character.Credit,
 		})
 	})
 	mux.HandleFunc("GET /api/status", s.status)

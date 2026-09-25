@@ -16,29 +16,29 @@ type Config struct {
 	VoicevoxURL string
 	ASRModel    string
 	LLMModel    string
-	Speaker     int
 	Deadline    time.Duration
 	StaticDir   string
+	Character   Character
 }
 
-func ConfigFromEnv() Config {
-	speaker := 3
-	if value, err := strconv.Atoi(os.Getenv("VOICEVOX_SPEAKER")); err == nil {
-		speaker = value
-	}
+func ConfigFromEnv() (Config, error) {
 	deadline := 120 * time.Second
 	if value, err := strconv.Atoi(os.Getenv("CONVERSATION_DEADLINE_SECONDS")); err == nil && value > 0 {
 		deadline = time.Duration(value) * time.Second
+	}
+	character, err := LoadCharacter(os.Getenv("CHARACTER_FILE"))
+	if err != nil {
+		return Config{}, err
 	}
 	return Config{
 		LemonadeURL: env("LEMONADE_URL", "https://lemonade.prd.butaco.net"),
 		VoicevoxURL: env("VOICEVOX_URL", "http://127.0.0.1:50021"),
 		ASRModel:    env("ASR_MODEL", "Whisper-Small"),
 		LLMModel:    env("LLM_MODEL", "Gemma-4-12B-it-MTP-GGUF"),
-		Speaker:     speaker,
 		Deadline:    deadline,
 		StaticDir:   env("STATIC_DIR", "dist/public"),
-	}
+		Character:   character,
+	}, nil
 }
 
 func env(name, fallback string) string {

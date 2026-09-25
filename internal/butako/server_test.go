@@ -55,9 +55,9 @@ func newTestHandler(t *testing.T, fake upstream) http.Handler {
 		VoicevoxURL: server.URL,
 		ASRModel:    "asr",
 		LLMModel:    "llm",
-		Speaker:     3,
 		Deadline:    500 * time.Millisecond,
 		StaticDir:   t.TempDir(),
+		Character:   DefaultCharacter(),
 	})
 }
 
@@ -140,6 +140,7 @@ func TestConversationLemonadeUnavailable(t *testing.T) {
 		LemonadeURL: "http://127.0.0.1:1",
 		VoicevoxURL: "http://127.0.0.1:1",
 		Deadline:    time.Second,
+		Character:   DefaultCharacter(),
 	})
 	recorder := postConversation(handler, "audio/wav", testWAV(16000, 0.3))
 	if recorder.Code != http.StatusServiceUnavailable || errorCode(t, recorder) != "lemonade_unavailable" {
@@ -167,5 +168,48 @@ func TestStatus(t *testing.T) {
 				t.Fatalf("body = %s, want %s", got, want)
 			}
 		})
+	}
+}
+
+func TestConversationUsesCharacter(t *testing.T) {
+	var asrPrompt, systemPrompt, speaker, synthesisSpeaker string
+	character := DefaultCharacter()
+	character.ASRPrompt = "モモ"
+	character.SystemPrompt = "あなたはモモです。"
+	character.Speaker = 1
+	character.SpeechReplacements = []Replacement{{"Momo", "モモ"}}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/audio/transcriptions", func(w http.ResponseWriter, r *http.Request) {
+		asrPrompt = r.FormValue("prompt")
+		_, _ = io.WriteString(w, `{"text":"こんにちは"}`)
+	})
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []chatMessage `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		systemPrompt = request.Messages[0].Content
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"Momo だよ"}}]}`)
+	})
+	mux.HandleFunc("/audio_query", func(w http.ResponseWriter, r *http.Request) {
+		speaker = r.URL.Query().Get("speaker")
+		if text := r.URL.Query().Get("text"); text != "モモ だよ" {
+			t.Errorf("speech text = %q", text)
+		}
+		_, _ = io.WriteString(w, `{}`)
+	})
+	mux.HandleFunc("/synthesis", func(w http.ResponseWriter, r *http.Request) {
+		synthesisSpeaker = r.URL.Query().Get("speaker")
+		_, _ = w.Write(testWAV(1600, 0.3))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	handler := NewHandler(Config{LemonadeURL: server.URL, VoicevoxURL: server.URL, Deadline: time.Second, Character: character})
+	recorder := postConversation(handler, "audio/wav", testWAV(16000, 0.3))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body)
+	}
+	if asrPrompt != "モモ" || systemPrompt != "あなたはモモです。" || speaker != "1" || synthesisSpeaker != "1" {
+		t.Fatalf("asr=%q system=%q speaker=%q/%q", asrPrompt, systemPrompt, speaker, synthesisSpeaker)
 	}
 }

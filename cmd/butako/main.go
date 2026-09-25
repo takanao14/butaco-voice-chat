@@ -10,7 +10,10 @@ import (
 )
 
 func main() {
-	config := butako.ConfigFromEnv()
+	config, err := butako.ConfigFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
 	addr := ":" + getenv("PORT", "8080")
 	log.Printf("butako listening on %s", addr)
 	server := &http.Server{

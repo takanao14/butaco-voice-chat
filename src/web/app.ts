@@ -1,5 +1,5 @@
 type Availability = "ready" | "model_unloaded" | "unavailable";
-type Config = { deadlineMs: number; maxAudioBytes: number };
+type Config = { deadlineMs: number; maxAudioBytes: number; name: string; credit: string };
 type Status = { lemonade: Availability; voicevoxReady: boolean };
 type Conversation = {
   transcript: string;
@@ -15,8 +15,11 @@ const answer = document.querySelector<HTMLElement>("#answer")!;
 const transcript = document.querySelector<HTMLElement>("#transcript")!;
 const reply = document.querySelector<HTMLElement>("#reply")!;
 const audio = document.querySelector<HTMLAudioElement>("#audio")!;
+const title = document.querySelector<HTMLElement>("#title")!;
+const replyLabel = document.querySelector<HTMLElement>("#reply-label")!;
+const credit = document.querySelector<HTMLElement>("#credit")!;
 
-let config: Config = { deadlineMs: 120_000, maxAudioBytes: 2 * 1024 * 1024 };
+let config: Config = { deadlineMs: 120_000, maxAudioBytes: 2 * 1024 * 1024, name: "ブタコ", credit: "VOICEVOX:ずんだもん" };
 let currentStatus: Status = { lemonade: "unavailable", voicevoxReady: false };
 let recorder: MediaRecorder | null = null;
 let stream: MediaStream | null = null;
@@ -41,6 +44,12 @@ const messages: Record<string, string> = {
 };
 
 function setState(message: string): void { state.textContent = message; }
+
+function applyCharacter(): void {
+  document.title = title.textContent = `${config.name}とおしゃべり`;
+  replyLabel.textContent = `${config.name}の返事`;
+  credit.textContent = `音声: ${config.credit}`;
+}
 
 function clearAnswer(): void {
   audio.pause();
@@ -77,7 +86,7 @@ async function pollStatus(): Promise<void> {
     currentStatus = { lemonade: "unavailable", voicevoxReady: false };
   }
   if (!serverReachable) {
-    availability.textContent = "ブタコのサーバーに接続できません";
+    availability.textContent = `${config.name}のサーバーに接続できません`;
   } else if (currentStatus.lemonade === "unavailable") {
     availability.textContent = "Lemonade 利用不可（GPU 別用途または起動中）";
   } else if (!currentStatus.voicevoxReady) {
@@ -178,7 +187,7 @@ async function handleRecording(chunksToProcess: Blob[], mimeType: string): Promi
     setState("録音を変換しています…");
     const wav = await convertToWAV(new Blob(chunksToProcess, { type: mimeType }));
     if (wav.size > config.maxAudioBytes) throw new Error("audio_too_large");
-    setState("ブタコが考えています…");
+    setState(`${config.name}が考えています…`);
     await sendWAV(wav);
   } catch (error) {
     const code = error instanceof Error ? error.message : "network_error";
@@ -243,6 +252,7 @@ void (async () => {
     const response = await fetch("/api/config", { cache: "no-store" });
     if (response.ok) config = await response.json() as Config;
   } catch { /* Server defaults match the UI defaults. */ }
+  applyCharacter();
   setState(idleMessage);
   await pollStatus();
   window.setInterval(() => void pollStatus(), 10_000);
