@@ -9,13 +9,13 @@ WORKDIR /app
 COPY go.mod ./
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /butako ./cmd/butako
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /butaco ./cmd/butaco
 
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
-RUN apk add --no-cache ca-certificates && addgroup -S butako && adduser -S -G butako butako
-COPY --from=backend /butako /butako
+RUN apk add --no-cache ca-certificates && addgroup -S butaco && adduser -S -G butaco butaco
+COPY --from=backend /butaco /butaco
 COPY --from=web /app/dist/public /public
 ENV STATIC_DIR=/public
-USER butako
+USER butaco
 EXPOSE 8080
-ENTRYPOINT ["/butako"]
+ENTRYPOINT ["/butaco"]

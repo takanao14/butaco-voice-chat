@@ -1,4 +1,4 @@
-# Butako voice chat
+# Butaco voice chat
 
 Go API and TypeScript Safari UI for one local push-to-talk conversation. The
 application sends WAV audio to Lemonade, uses Gemma for a short Japanese reply,
@@ -14,7 +14,7 @@ CPU image is pinned by version and digest in `compose.yaml`.
 docker compose up -d voicevox
 npm ci
 npm run build
-go run ./cmd/butako
+go run ./cmd/butaco
 ```
 
 Open `http://localhost:8080` on the development machine. iPhone Safari needs
@@ -30,7 +30,7 @@ response. `CONVERSATION_DEADLINE_SECONDS` sets the shared API and browser
 deadline (120 seconds by default). The browser obtains it from `/api/config`.
 
 `CHARACTER_FILE` points to an optional JSON file that overrides the built-in
-Butako character. Omitted fields keep their defaults, unknown fields stop the
+Butaco character. Omitted fields keep their defaults, unknown fields stop the
 server at startup, and the file is read once at startup:
 
 ```json
@@ -56,9 +56,9 @@ from ESPN's unofficial API every 30 minutes, and each conversation appends a
 Japanese summary to the system prompt. Times, results, and table order are
 computed in `internal/football`, not by the model. If no refresh has
 succeeded within three hours, the summary says match data is unavailable.
-`BUTAKO_ESPN_LIVE=1 go test -run TestESPNLive -v ./internal/football` checks
+`BUTACO_ESPN_LIVE=1 go test -run TestESPNLive -v ./internal/football` checks
 the live API shape. The default values are in
-`internal/butako/character.go`.
+`internal/butaco/character.go`.
 
 VOICEVOX logs `audio_query` text by default. The development container's
 stdout and stderr are discarded so those access lines are not retained. The

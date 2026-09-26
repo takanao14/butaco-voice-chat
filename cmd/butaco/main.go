@@ -7,26 +7,26 @@ import (
 	"os"
 	"time"
 
-	"github.com/takanao14/butaco-voice-chat/internal/butako"
+	"github.com/takanao14/butaco-voice-chat/internal/butaco"
 	"github.com/takanao14/butaco-voice-chat/internal/football"
 )
 
 func main() {
-	config, err := butako.ConfigFromEnv()
+	config, err := butaco.ConfigFromEnv()
 	if err != nil {
 		log.Fatal(err)
 	}
-	var facts butako.Facts
+	var facts butaco.Facts
 	if config.Character.Football != nil {
 		matches := football.NewService(football.NewESPN(), *config.Character.Football)
 		go matches.Run(context.Background())
 		facts = matches
 	}
 	addr := ":" + getenv("PORT", "8080")
-	log.Printf("butako listening on %s", addr)
+	log.Printf("butaco listening on %s", addr)
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           butako.NewHandler(config, facts),
+		Handler:           butaco.NewHandler(config, facts),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}

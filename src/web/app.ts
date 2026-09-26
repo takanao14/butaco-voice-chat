@@ -195,7 +195,7 @@ function remember(user: string, assistant: string): void {
   lastTurnAt = performance.now();
 }
 
-// base64url of UTF-8 JSON, the form the server's X-Butako-History expects.
+// base64url of UTF-8 JSON, the form the server's X-Butaco-History expects.
 function encodeHistory(items: Turn[]): string {
   let binary = "";
   for (const byte of new TextEncoder().encode(JSON.stringify(items))) binary += String.fromCharCode(byte);
@@ -283,7 +283,7 @@ async function sendWAV(wav: Blob): Promise<PlayOutcome> {
   try {
     const headers: Record<string, string> = { "Content-Type": "audio/wav" };
     const recent = recentHistory();
-    if (recent.length) headers["X-Butako-History"] = encodeHistory(recent);
+    if (recent.length) headers["X-Butaco-History"] = encodeHistory(recent);
     const response = await fetch("/api/conversation", {
       method: "POST",
       headers,

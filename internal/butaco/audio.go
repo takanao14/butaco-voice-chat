@@ -1,4 +1,4 @@
-package butako
+package butaco
 
 import (
 	"encoding/binary"

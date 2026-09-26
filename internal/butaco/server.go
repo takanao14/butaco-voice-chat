@@ -1,4 +1,4 @@
-package butako
+package butaco
 
 import (
 	"context"
@@ -210,7 +210,7 @@ func writeStageError(w http.ResponseWriter, err error) {
 }
 
 const (
-	historyHeader   = "X-Butako-History"
+	historyHeader   = "X-Butaco-History"
 	maxHistoryTurns = 3
 	maxHistoryRunes = 500
 )
