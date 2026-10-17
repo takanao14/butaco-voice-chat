@@ -1,10 +1,10 @@
-FROM node:24.21.0-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS web
+FROM node:24.22.0-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS web
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.web.json ./
 COPY src/web ./src/web
 RUN npm ci --ignore-scripts && npm run build
 
-FROM golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS backend
+FROM golang:1.27.2-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS backend
 WORKDIR /app
 COPY go.mod ./
 COPY cmd ./cmd
