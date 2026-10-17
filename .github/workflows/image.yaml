@@ -7,10 +7,28 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
+  main-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Require the tagged commit to be on main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor 'HEAD^{commit}' refs/remotes/origin/main
+
+  validate:
+    needs: main-commit
+    uses: ./.github/workflows/ci.yaml
+
   image:
+    needs: [main-commit, validate]
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
