@@ -7,6 +7,11 @@ for the request and does not write request bodies or prompts to application logs
 
 ## Local development
 
+Create a branch and open a pull request for every change to `main`, including
+dependency updates. No approval is required, but the required `test` check must
+pass with the branch up to date with `main`. Direct pushes, force pushes, and
+deletion of `main` are blocked, with no owner or bot bypass.
+
 Requires Go 1.22+, Node.js 24+, and Docker on an ARM64 Mac. VOICEVOX's official
 CPU image is pinned by version and digest in `compose.yaml`.
 
@@ -63,3 +68,12 @@ the live API shape. The default values are in
 VOICEVOX logs `audio_query` text by default. The development container's
 stdout and stderr are discarded so those access lines are not retained. The
 production VOICEVOX deployment must apply the same privacy constraint.
+
+## Releases
+
+After merging the pull request, wait for the `CI` workflow on `main` to succeed.
+Create and push a new `v*` tag on that verified commit. The publish workflow
+requires the tagged commit to be contained in `main` and reruns the same Go
+vet/tests, web build, and Docker build through the reusable CI workflow before
+publishing `ghcr.io/takanao14/butaco-voice-chat:<tag>`. A failed ancestry check
+or validation blocks publication. Publishing an image does not deploy it.
